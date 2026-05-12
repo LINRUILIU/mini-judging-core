@@ -1,0 +1,38 @@
+# Build outputs
+/build/
+/build-*/
+/out/
+
+# Generated runtime data
+/generated/
+/reports/
+
+# IDE files
+/.vs/
+/.vscode/
+/.idea/
+*.VC.db
+*.VC.opendb
+
+# CMake / compiler intermediates
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+cmake_install.cmake
+compile_commands.json
+Makefile
+*.cmake.user
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Executables and debug artifacts
+*.exe
+*.dll
+*.stackdump
+

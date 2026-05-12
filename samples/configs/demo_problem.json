@@ -1,0 +1,20 @@
+{
+  "problem_id": "demo-ab",
+  "time_limit_ms": 500,
+  "max_output_bytes": 65536,
+  "compare_mode": "trim-right",
+  "paths": {
+    "program_dir": "../programs",
+    "test_dir": "../tests",
+    "report_dir": "../out"
+  },
+  "programs": [
+    { "id": "1001", "exe": "1001.exe" },
+    { "id": "1002", "exe": "1002.exe" },
+    { "id": "1003", "exe": "1003.exe" }
+  ],
+  "tests": [
+    { "id": "01", "input": "01.in", "answer": "01.out", "score": 50 },
+    { "id": "02", "input": "02.in", "answer": "02.out", "score": 50 }
+  ]
+}
