@@ -29,14 +29,22 @@ flowchart LR
 
 ## Showcase Highlights
 
-- Win32 subprocess control with `CreateProcessW`, anonymous pipes, timeout handling, and forced termination
-- Fixed-size worker pool for `(program, testcase)` batch execution
+- Win32 subprocess control with explicit handle inheritance, Job Object process-tree cleanup, and wall-clock timeouts
+- File-backed finite stdin, separate stdout/stderr pipes, and a combined output budget
+- Fixed-size worker pool with a bounded FIFO queue, producer backpressure, and task exception handling
 - Small compare-mode set focused on deterministic demo behavior
 - Three report surfaces:
   - `report.json`
   - `summary.csv`
   - `report.html`
 - Sample integration case with `AC`, `WA`, and `TLE` outcomes
+- Fault fixtures and report-content checks that also run in Release builds
+
+The execution, configuration, cancellation, and failure semantics are documented
+in [the reliability contract](docs/reliability.md). Each execution now runs in its
+own temporary working directory. Programs must use stdin/stdout or explicit paths
+for external files. The output limit counts stdout and stderr together; only
+stdout participates in answer comparison.
 
 ## Relationship To Earlier Work
 
@@ -59,6 +67,10 @@ The point of this repository is to present those ideas in a smaller and cleaner 
 
 ## Build
 
+Use CMake 3.20+, a C++17 Windows compiler, and PowerShell 7 (`pwsh`) for the
+end-to-end test suite. Tests check verdicts and generated reports as well as
+process exit codes. Runtime checks stay enabled in Release builds.
+
 ### Visual Studio / MSVC
 
 ```powershell
@@ -69,9 +81,16 @@ ctest --test-dir build -C Debug --output-on-failure
 
 ### MinGW
 
+Put Ninja and the MinGW compiler/runtime directory on `PATH`. Ninja is used here
+because the bundled MinGW Make tool failed to resolve source files under a
+Chinese path during validation; the same source path built successfully with
+Ninja. Adjust the compiler path for your installation.
+
 ```powershell
-cmake -G "MinGW Makefiles" `
+$env:Path = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin;$env:Path"
+cmake -G Ninja `
   -DCMAKE_CXX_COMPILER="C:/Program Files (x86)/Dev-Cpp/MinGW64/bin/g++.exe" `
+  -DCMAKE_BUILD_TYPE=Release `
   -S . -B build-mingw
 cmake --build build-mingw
 ctest --test-dir build-mingw --output-on-failure
@@ -82,13 +101,13 @@ ctest --test-dir build-mingw --output-on-failure
 After building, run:
 
 ```powershell
-build\Debug\mini_judge.exe --config build\sample_runtime\configs\demo_problem.json --jobs 2
+build\Debug\mini_judge.exe --config build\sample_runtime\Debug\configs\demo_problem.json --jobs 2
 ```
 
 Or for MinGW:
 
 ```powershell
-build-mingw\mini_judge.exe --config build-mingw\sample_runtime\configs\demo_problem.json --jobs 2
+build-mingw\mini_judge.exe --config build-mingw\sample_runtime\Release\configs\demo_problem.json --jobs 2
 ```
 
 The demo produces:
@@ -130,7 +149,9 @@ Then run:
 
 ## Real Dataset Result
 
-This repository has already been exercised against the legacy `25261-term` Visual Studio dataset:
+The original version was exercised against the legacy `25261-term` Visual Studio
+dataset on 2026-05-12. These are historical results, not a rerun of the reliability
+fixes:
 
 - Programs: `744`
 - Testcases per program: `32`
@@ -154,13 +175,17 @@ That run produced:
 - `reports/25261-term-full/summary.csv`
 - `reports/25261-term-full/report.html`
 
-This is the strongest showcase path for the repository because it replays a real grading batch rather than a synthetic toy example.
+The dataset and generated reports are local historical artifacts, not bundled
+with this repository. For a reproducible checkout, use the built-in demo and
+fault fixtures. The Windows CI artifacts contain test results and demo reports.
 
 ## Repository Notes
 
 - Design notes live in [docs/design-notes.md](docs/design-notes.md)
 - Legacy dataset notes live in [docs/25261-term-showcase.md](docs/25261-term-showcase.md)
 - Repository layout notes live in [docs/repo-layout.md](docs/repo-layout.md)
+- Execution and validation semantics live in [docs/reliability.md](docs/reliability.md)
+- P0/P1 fixes and local verification are recorded in [docs/p0-p1-validation.md](docs/p0-p1-validation.md)
 - CI workflow lives in [.github/workflows/windows.yml](.github/workflows/windows.yml)
 
 ## Limitations
