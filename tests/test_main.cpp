@@ -1,14 +1,24 @@
 #include "mini_judge/comparator.hpp"
 #include "mini_judge/config.hpp"
 #include "mini_judge/scheduler.hpp"
+#include "test_support.hpp"
 
 #include <atomic>
-#include <cassert>
+#include <stdexcept>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 
 using namespace mini_judge;
+
+// Do not use the C assert macro here: Release builds define NDEBUG.
+void Check(bool condition, const char* expression, int line) {
+    if (!condition) {
+        throw std::runtime_error(std::string("test_main.cpp:") + std::to_string(line) +
+                                 ": CHECK failed: " + expression);
+    }
+}
+#define CHECK(expression) Check(static_cast<bool>(expression), #expression, __LINE__)
 
 namespace {
 
@@ -21,21 +31,23 @@ void WriteFile(const std::filesystem::path& path, const std::string& text) {
 void TestComparator() {
     {
         const auto result = CompareText(CompareMode::Exact, "abc\n", "abc\n");
-        assert(result.matched);
+        CHECK(result.matched);
     }
     {
         const auto result = CompareText(CompareMode::TrimRight, "abc   \n", "abc\n");
-        assert(result.matched);
+        CHECK(result.matched);
     }
     {
         const auto result = CompareText(CompareMode::IgnoreTrailingBlankLines, "abc\n\n", "abc\n");
-        assert(result.matched);
+        CHECK(result.matched);
     }
     {
         const auto result = CompareText(CompareMode::TrimRight, "a\nb\n", "a\nc\n");
-        assert(!result.matched);
-        assert(result.first_diff_line == 2);
+        CHECK(!result.matched);
+        CHECK(result.first_diff_line == 2);
     }
+    CHECK(!CompareText(CompareMode::TrimRight, "<missing>\n", "").matched);
+    CHECK(!CompareText(CompareMode::IgnoreTrailingBlankLines, "", "<missing>\n").matched);
 }
 
 void TestScheduler() {
@@ -45,12 +57,12 @@ void TestScheduler() {
         scheduler.Submit([&value]() { ++value; });
     }
     scheduler.Wait();
-    assert(value.load() == 10);
+    CHECK(value.load() == 10);
 }
 
 void TestConfigValidation() {
-    const auto root = std::filesystem::temp_directory_path() / "mini_judge_config_test";
-    std::filesystem::remove_all(root);
+    TestTempDir temp("basic_config");
+    const auto& root = temp.path;
     std::filesystem::create_directories(root / "programs");
     std::filesystem::create_directories(root / "tests");
     WriteFile(root / "programs" / "1001.exe", "");
@@ -72,18 +84,25 @@ void TestConfigValidation() {
               "}\n");
 
     const auto config = LoadConfig(root / "config.json");
-    assert(config.programs.size() == 1);
-    assert(config.tests.size() == 1);
-    assert(config.compare_mode == CompareMode::TrimRight);
-    std::filesystem::remove_all(root);
+    CHECK(config.programs.size() == 1);
+    CHECK(config.tests.size() == 1);
+    CHECK(config.compare_mode == CompareMode::TrimRight);
 }
 
 }  // namespace
 
-int main() {
-    TestComparator();
-    TestScheduler();
-    TestConfigValidation();
-    std::cout << "mini_judge_tests passed" << std::endl;
-    return 0;
+int main(int argc, char* argv[]) {
+    try {
+        if (argc == 2 && std::string(argv[1]) == "--verify-check-failure") {
+            CHECK(false);
+        }
+        TestComparator();
+        TestScheduler();
+        TestConfigValidation();
+        std::cout << "mini_judge_tests passed" << std::endl;
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << std::endl;
+        return 1;
+    }
 }

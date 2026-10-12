@@ -2,13 +2,15 @@
 
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 
 namespace mini_judge {
 namespace {
 
 std::string EscapeJson(const std::string& value) {
     std::string out;
-    for (char c : value) {
+    constexpr char hex[] = "0123456789abcdef";
+    for (unsigned char c : value) {
         switch (c) {
             case '\\':
                 out += "\\\\";
@@ -26,7 +28,13 @@ std::string EscapeJson(const std::string& value) {
                 out += "\\t";
                 break;
             default:
-                out.push_back(c);
+                if (c < 0x20) {
+                    out += "\\u00";
+                    out.push_back(hex[c >> 4]);
+                    out.push_back(hex[c & 0x0f]);
+                } else {
+                    out.push_back(static_cast<char>(c));
+                }
                 break;
         }
     }
@@ -51,7 +59,7 @@ std::string EscapeCsv(const std::string& value) {
 
 std::string EscapeHtml(const std::string& value) {
     std::string out;
-    for (char c : value) {
+    for (unsigned char c : value) {
         switch (c) {
             case '&':
                 out += "&amp;";
@@ -65,8 +73,15 @@ std::string EscapeHtml(const std::string& value) {
             case '"':
                 out += "&quot;";
                 break;
+            case '\'':
+                out += "&#39;";
+                break;
             default:
-                out.push_back(c);
+                if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') {
+                    out += "&#xfffd;";
+                } else {
+                    out.push_back(static_cast<char>(c));
+                }
                 break;
         }
     }
@@ -91,10 +106,24 @@ std::string StatusClass(const CaseStatus status) {
     return "status-se";
 }
 
+std::ofstream OpenReport(const std::filesystem::path& path) {
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        throw std::runtime_error("Failed to open report file: " + path.u8string());
+    }
+    out.exceptions(std::ios::badbit | std::ios::failbit);
+    return out;
+}
+
+void FinishReport(std::ofstream& out) {
+    out.flush();
+    out.close();
+}
+
 }  // namespace
 
 void WriteJsonReport(const BatchReport& report, const std::filesystem::path& path) {
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out = OpenReport(path);
     out << "{\n";
     out << "  \"problem_id\": \"" << EscapeJson(report.problem_id) << "\",\n";
     out << "  \"generated_at\": \"" << EscapeJson(report.generated_at) << "\",\n";
@@ -135,10 +164,11 @@ void WriteJsonReport(const BatchReport& report, const std::filesystem::path& pat
     }
     out << "  ]\n";
     out << "}\n";
+    FinishReport(out);
 }
 
 void WriteCsvSummary(const BatchReport& report, const std::filesystem::path& path) {
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out = OpenReport(path);
     out << "program_id,total_score,max_score,passed_count,failed_count,AC,WA,TLE,RE,OLE,SE\n";
     for (const auto& program : report.programs) {
         out << EscapeCsv(program.program_id) << ","
@@ -153,10 +183,11 @@ void WriteCsvSummary(const BatchReport& report, const std::filesystem::path& pat
             << program.ole_count << ","
             << program.se_count << "\n";
     }
+    FinishReport(out);
 }
 
 void WriteHtmlReport(const BatchReport& report, const std::filesystem::path& path) {
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out = OpenReport(path);
     out << "<!DOCTYPE html>\n"
         << "<html lang=\"en\">\n"
         << "<head>\n"
@@ -265,6 +296,7 @@ void WriteHtmlReport(const BatchReport& report, const std::filesystem::path& pat
         << "</div>\n"
         << "</body>\n"
         << "</html>\n";
+    FinishReport(out);
 }
 
 }  // namespace mini_judge

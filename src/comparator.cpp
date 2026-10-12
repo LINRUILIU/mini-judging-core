@@ -1,5 +1,6 @@
 #include "mini_judge/comparator.hpp"
 
+#include <algorithm>
 #include <sstream>
 #include <vector>
 
@@ -15,11 +16,6 @@ std::vector<std::string> SplitLines(const std::string& text) {
             line.pop_back();
         }
         lines.push_back(line);
-    }
-    if (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
-        if (!text.empty() && text.size() >= 2 && text[text.size() - 2] == '\n') {
-            return lines;
-        }
     }
     return lines;
 }
@@ -66,16 +62,23 @@ CompareResult CompareText(CompareMode mode, const std::string& expected, const s
         RemoveTrailingBlankLines(actual_lines);
     }
 
-    const auto max_lines = (expected_lines.size() > actual_lines.size()) ? expected_lines.size() : actual_lines.size();
-    for (std::size_t i = 0; i < max_lines; ++i) {
-        const std::string expected_line = (i < expected_lines.size()) ? expected_lines[i] : "<missing>";
-        const std::string actual_line = (i < actual_lines.size()) ? actual_lines[i] : "<missing>";
-        if (expected_line != actual_line) {
+    // Compare only lines that exist on both sides. A literal "<missing>" line is data,
+    // never a sentinel for an absent line.
+    const auto common_lines = std::min(expected_lines.size(), actual_lines.size());
+    for (std::size_t i = 0; i < common_lines; ++i) {
+        if (expected_lines[i] != actual_lines[i]) {
             result.matched = false;
             result.first_diff_line = static_cast<int>(i + 1);
             result.message = "Difference at line " + std::to_string(i + 1);
             return result;
         }
+    }
+
+    if (expected_lines.size() != actual_lines.size()) {
+        result.matched = false;
+        result.first_diff_line = static_cast<int>(common_lines + 1);
+        result.message = "Difference at line " + std::to_string(common_lines + 1);
+        return result;
     }
 
     result.matched = true;

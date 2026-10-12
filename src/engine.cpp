@@ -10,30 +10,36 @@
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 
 namespace mini_judge {
 namespace {
 
 std::string ReadTextFile(const std::filesystem::path& path) {
-    FILE* file = _wfopen(path.c_str(), L"rb");
-    if (file == nullptr) {
-        throw std::runtime_error("Failed to open text file: " + path.string());
+    const std::unique_ptr<FILE, decltype(&fclose)> file(_wfopen(path.c_str(), L"rb"), &fclose);
+    if (!file) {
+        throw std::runtime_error("Failed to open text file: " + path.u8string());
     }
     std::string buffer;
     char chunk[4096];
     while (true) {
-        const std::size_t read = fread(chunk, 1, sizeof(chunk), file);
+        const std::size_t read = fread(chunk, 1, sizeof(chunk), file.get());
         if (read > 0) {
             buffer.append(chunk, chunk + read);
         }
         if (read < sizeof(chunk)) {
+            if (ferror(file.get())) {
+                throw std::runtime_error("Failed to read text file: " + path.u8string());
+            }
             break;
         }
     }
-    fclose(file);
     return buffer;
 }
 
@@ -81,15 +87,44 @@ void UpdateCounters(ProgramReport& report, const CaseResult& case_result) {
 }  // namespace
 
 BatchReport RunJudge(const ProblemConfig& config, int jobs, bool verbose_progress) {
+    // Also guard callers that construct ProblemConfig without LoadConfig.
+    if (jobs < 1 || jobs > TaskScheduler::kMaxWorkers) {
+        throw std::invalid_argument("jobs must be between 1 and 256");
+    }
+    if (config.time_limit_ms < 1 || config.time_limit_ms > 3600000 ||
+        config.max_output_bytes < 1 || config.max_output_bytes > 64ULL * 1024 * 1024) {
+        throw std::invalid_argument("Execution limits are out of range");
+    }
+    const auto max_count = static_cast<std::size_t>((std::numeric_limits<int>::max)());
+    if (config.programs.empty() || config.tests.empty() ||
+        config.programs.size() > max_count / config.tests.size()) {
+        throw std::invalid_argument("Batch must contain between 1 and INT_MAX cases");
+    }
+    std::set<std::string> program_ids;
+    for (const auto& program : config.programs) {
+        if (program.id.empty() || !program_ids.insert(program.id).second) {
+            throw std::invalid_argument("Program IDs must be nonempty and unique");
+        }
+    }
+    std::set<std::string> test_ids;
+    int max_score = 0;
+    for (const auto& test : config.tests) {
+        if (test.id.empty() || !test_ids.insert(test.id).second) {
+            throw std::invalid_argument("Test IDs must be nonempty and unique");
+        }
+        if (test.score < 0 || test.score > (std::numeric_limits<int>::max)() - max_score) {
+            throw std::invalid_argument("Total score must be between 0 and INT_MAX");
+        }
+        max_score += test.score;
+    }
     BatchReport report;
     report.problem_id = config.problem_id;
     report.generated_at = TimestampNow();
-    report.jobs = jobs > 0 ? jobs : 1;
+    report.jobs = jobs;
     report.total_programs = static_cast<int>(config.programs.size());
     report.total_cases = static_cast<int>(config.programs.size() * config.tests.size());
 
     ProcessRunner runner;
-    TaskScheduler scheduler(report.jobs);
 
     std::map<std::string, ProgramReport> reports_by_program;
     std::mutex reports_mutex;
@@ -102,6 +137,9 @@ BatchReport RunJudge(const ProblemConfig& config, int jobs, bool verbose_progres
         reports_by_program.emplace(program.id, std::move(initial));
     }
 
+    // Destroy/join the pool BEFORE every object referenced by its tasks, even
+    // if Submit, result allocation, or a later Wait throws.
+    TaskScheduler scheduler(report.jobs);
     for (const auto& program : config.programs) {
         for (const auto& test : config.tests) {
             const ProgramEntry* program_ptr = &program;
@@ -139,13 +177,16 @@ BatchReport RunJudge(const ProblemConfig& config, int jobs, bool verbose_progres
                 } catch (const std::exception& ex) {
                     case_result.status = CaseStatus::SE;
                     case_result.message = ex.what();
+                } catch (...) {
+                    case_result.status = CaseStatus::SE;
+                    case_result.message = "Unknown execution or comparison failure";
                 }
 
                 {
                     std::lock_guard<std::mutex> lock(reports_mutex);
                     auto& program_report = reports_by_program.at(program.id);
-                    UpdateCounters(program_report, case_result);
                     program_report.cases.push_back(case_result);
+                    UpdateCounters(program_report, case_result);
                 }
 
                 const int done = ++completed;
